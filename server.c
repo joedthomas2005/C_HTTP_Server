@@ -5,12 +5,14 @@
 #include<netinet/ip.h>
 #include<string.h>
 #include<malloc.h>
-#include "searchtree.h"
 
-#define PORT 8081
-#define BUFSIZE 8192 
+#include "searchtree.h"
+#include "linkedlist.h"
+
 #define TRUE 1
 #define FALSE 0
+#define PORT 8081
+#define BUFSIZE 8192 
 #define bool unsigned char
 
 #define ERROR(err) {\
@@ -21,7 +23,7 @@
 struct http_request {
     char method[8];
     char path[2049];
-    struct treenode headers;
+    struct searchtree_node headers;
     char* body;
     size_t body_len;
 };
@@ -29,13 +31,14 @@ struct http_request {
 struct http_response {
     int response_code;
     char response_message[256];
-    struct treenode* headers;
+    struct searchtree_node* headers;
 };
 
 int listen_connections(int port);
 int parse_http_request(char* request, size_t request_len, struct http_request* req_struct);
-int split_headers(struct treenode* header_search_tree, char* header_block, int header_length);
+int split_headers(struct searchtree_node* header_search_tree, char* header_block, int header_length);
 int accept_connection(int conn_sock, struct sockaddr_in conn_addr, socklen_t conn_addr_size);
+int create_http_response(int response_code, char* response_message, const struct searchtree_node* headers, char* body, size_t body_len);
 
 int main(int argc, char** argv){
     printf("Beginning HTTP Server on port %d\n", PORT);
@@ -100,6 +103,8 @@ int accept_connection(int conn_sock, struct sockaddr_in conn_addr, socklen_t con
     printf("Path: %s\n", req_struct.path);
     printf("Body: %s\n", req_struct.body);
     searchtree_for_each(&(req_struct.headers), print_callback_func);
+    create_http_response(200, "OK", &(req_struct.headers), "", 0);
+
     free(req_struct.body);
     searchtree_free(&(req_struct.headers));
     return 0;
@@ -130,9 +135,12 @@ int parse_http_request(char* requestbuf, size_t buflen, struct http_request* out
     while (cur_read_pos + header_portion_length < buflen && strncmp("\r\n\r\n", requestbuf + header_portion_length + cur_read_pos - 3, 4) != 0){
         header_portion_length += 1;
     }
+    if(header_portion_length + cur_read_pos >= buflen){
+        return -1;
+    }
     char* header_portion = (char*)malloc((header_portion_length - 1) * sizeof(char));
     memset(header_portion, 0, (header_portion_length - 1) * sizeof(char));
-    strncpy(header_portion, requestbuf + cur_read_pos + 1, header_portion_length - 2);
+    strncpy(header_portion, requestbuf + cur_read_pos + 1, header_portion_length - 2); // -2 removes \r\n
     cur_read_pos += header_portion_length + 1;
     out_struct->body = (char*)malloc(buflen - cur_read_pos + 1);
     memset(out_struct->body, 0, buflen - cur_read_pos + 1);
@@ -144,7 +152,7 @@ int parse_http_request(char* requestbuf, size_t buflen, struct http_request* out
     return 0;
 }
 
-int split_headers(struct treenode* search_tree_root, char* header_block, int header_block_length){
+int split_headers(struct searchtree_node* search_tree_root, char* header_block, int header_block_length){
     int cur_pos = 0;
     int line_pos = 0;
     int header_name_length = 0;
@@ -177,4 +185,10 @@ int split_headers(struct treenode* search_tree_root, char* header_block, int hea
         line_pos += 1;
     }
     return 0;
+}
+
+int create_http_response(int status_code, char* response_message, const struct searchtree_node* headers, char* body, size_t body_len){
+    char* status_line = (char*)malloc(16 + strlen(response_message)); // HTTP/1.1 xxx MESSAGE\r\n\0
+    snprintf(status_line, strlen(response_message) + 16, "HTTP/1.1 %3.3i %s\r\n", status_code, response_message);
+    printf("Response status line: %s", status_line);
 }
